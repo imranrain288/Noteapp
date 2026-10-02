@@ -1,8 +1,24 @@
-import React from "react";
 import { useState } from "react";
+import { MdClose, MdNotificationsActive } from "react-icons/md";
 import TagInput from "../../components/Input/TagInput";
-import { MdClose } from "react-icons/md";
 import axiosInstance from "../../utils/axiosinstance";
+
+const labelColors = [
+  { name: "Blue", color: "#BFDBFE" },
+  { name: "Green", color: "#BBF7D0" },
+  { name: "Yellow", color: "#FDE68A" },
+  { name: "Orange", color: "#FED7AA" },
+  { name: "Pink", color: "#FBCFE8" },
+  { name: "Purple", color: "#DDD6FE" },
+  { name: "Red", color: "#FECACA" },
+];
+
+const toLocalDateTime = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
 
 export default function AddEditNote({
   onClose,
@@ -14,127 +30,165 @@ export default function AddEditNote({
   const [tags, setTags] = useState(noteData?.tags || []);
   const [title, setTitle] = useState(noteData?.title || "");
   const [content, setContent] = useState(noteData?.content || "");
-  const [error, setError] = useState(null);
+  const [label, setLabel] = useState(noteData?.label || "");
+  const [labelColor, setLabelColor] = useState(noteData?.labelColor || "#F9FBFC");
+  const [reminderAt, setReminderAt] = useState(toLocalDateTime(noteData?.reminderAt));
+  const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSetTags = newTags => {
-    if (newTags.length <= 5) { // Limit to 5 tags
-      setTags(newTags.map(tag => tag.slice(0, 10))); // Each tag up to 10 characters
-    }
-  };
-
-  const addNewNote = async () => {
-    try {
-      const response = await axiosInstance.post("/create-note", {
-        title,
-        content,
-        tags,
-      });
-      if (response.data.error) {
-        setError(response.data.error);
-        return;
-      }
-      if (response.data.note) {
-        getAllNotes();
-        onClose();
-        showToast("Note Added Successfully");
-      }
-    } catch (error) {
-      console.log(error);
-    }
-  };
-
-  const handleEditNote = async () => {
-    try {
-      console.log("Editing Note with id" + " " + noteData._id);
-      const response = await axiosInstance.post(`/edit-note/${noteData._id}`, {
-        title,
-        content,
-        tags,
-      });
-      if (response.data.error) {
-        setError(response.data.error);
-        return;
-      }
-      if (response.data.note) {
-        getAllNotes();
-        onClose();
-        showToast("Note Edited Successfully");
-      }
-    } catch (error) {
-      console.log(error);
-    }
-  };
-
-  const handleAddNote = () => {
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     if (!title.trim() || !content.trim()) {
-      setError("Please fill all the fields");
+      setError("Add a title and some content before saving.");
       return;
     }
 
-    setError(null);
-
-    if (type === "add") {
-      console.log("Adding Note");
-      addNewNote();
-      showToast("Note Added Successfully");
+    setError("");
+    if (reminderAt && "Notification" in window && Notification.permission === "default") {
+      try {
+        await Notification.requestPermission();
+      } catch (permissionError) {
+        console.error("Could not request notification permission:", permissionError);
+      }
     }
-
-    if (type === "edit") {
-      console.log("Editing Note");
-      handleEditNote();
+    setIsSaving(true);
+    try {
+      const noteDataToSave = {
+        title,
+        content,
+        tags,
+        label,
+        labelColor,
+        reminderAt: reminderAt ? new Date(reminderAt).toISOString() : null,
+      };
+      if (type === "edit") {
+        await axiosInstance.post(`/edit-note/${noteData._id}`, noteDataToSave);
+      } else {
+        await axiosInstance.post("/create-note", noteDataToSave);
+      }
+      getAllNotes();
+      onClose();
+      showToast(type === "edit" ? "Note updated" : "Note created");
+      if (reminderAt && (!("Notification" in window) || Notification.permission !== "granted")) {
+        showToast("Reminder saved. Enable browser notifications to get alerts.", "delete");
+      }
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Couldn't save this note. Please try again.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
   return (
-    <>
-    <div className="fixed inset-0 bg-gray-900 bg-opacity-50 flex justify-center items-center">
-      <div className="relative bg-white rounded-lg shadow-xl p-4 sm:p-8 w-full max-w-4xl m-4">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"
-        >
-          <MdClose size={24} />
-        </button>
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">
-          {type === "add" ? "Add New Note" : "Edit Note"}
-        </h2>
-        <div className="space-y-4">
+    <div className="modal-overlay" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <form className="note-dialog" onSubmit={handleSubmit}>
+        <div className="note-dialog-heading">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Title</label>
-            <input
-              type="text"
-              className="w-full form-input border border-gray-300 rounded-lg shadow-sm p-2 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
-              placeholder="Enter Title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value.slice(0, 50))} // Max length of 50 characters
-            />
+            <h2>{type === "edit" ? "Edit note" : "Create a note"}</h2>
+            <p>Save the details you want to remember.</p>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Content</label>
-            <textarea
-              className="w-full form-textarea border border-gray-300 rounded-lg shadow-sm p-2 focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
-              placeholder="Enter Content"
-              rows={6}
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-            ></textarea>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Tags</label>
-            <TagInput tags={tags} setTags={handleSetTags} />
-          </div>
-          {error && (
-            <p className="text-red-500 text-sm">{error}</p>
-          )}
-          <button
-            className="w-full rounded-lg bg-blue-500 py-3 text-white font-medium hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-            onClick={handleAddNote}
-          >
-            {type === "add" ? "Add Note" : "Edit Note"}
+          <button className="icon-button" onClick={onClose} type="button" aria-label="Close">
+            <MdClose size={21} />
           </button>
         </div>
-      </div>
+
+        <div className="form-field">
+          <label htmlFor="note-title">Title</label>
+          <input
+            id="note-title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value.slice(0, 100))}
+            placeholder="Give your note a title"
+            maxLength={100}
+            autoFocus
+          />
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="note-content">Content</label>
+          <textarea
+            id="note-content"
+            value={content}
+            onChange={(event) => setContent(event.target.value)}
+            placeholder="Start writing..."
+            rows={7}
+          />
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="note-keywords">Keywords</label>
+          <TagInput tags={tags} setTags={setTags} />
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="note-label">Custom label</label>
+          <input
+            id="note-label"
+            value={label}
+            onChange={(event) => setLabel(event.target.value.slice(0, 40))}
+            placeholder="e.g. Work, Personal, Ideas"
+            maxLength={40}
+          />
+        </div>
+
+        <div className="form-field">
+          <label>Label color</label>
+          <div className="label-color-options">
+            {labelColors.map(({ name, color: swatch }) => (
+              <button
+                key={swatch}
+                className={`label-color-swatch ${labelColor === swatch ? "selected" : ""}`}
+                style={{ "--swatch-color": swatch }}
+                onClick={() => setLabelColor(swatch)}
+                type="button"
+                aria-label={`${name} label color`}
+                aria-pressed={labelColor === swatch}
+                title={name}
+              />
+            ))}
+            <div className="custom-color-picker">
+              <span>Custom</span>
+              <input
+                type="color"
+                value={labelColor}
+                onChange={(event) => setLabelColor(event.target.value.toUpperCase())}
+                aria-label="Choose custom label color"
+              />
+            </div>
+            <button
+              className={`label-color-swatch no-color ${labelColor === "#F9FBFC" ? "selected" : ""}`}
+              onClick={() => setLabelColor("#F9FBFC")}
+              type="button"
+              aria-label="No label color"
+              aria-pressed={labelColor === "#F9FBFC"}
+              title="Default color"
+            />
+          </div>
+          <span className="color-code-value">{labelColor.toUpperCase()}</span>
+        </div>
+
+        <div className="form-field">
+          <label htmlFor="note-reminder"><MdNotificationsActive size={15} /> Reminder</label>
+          <input
+            id="note-reminder"
+            type="datetime-local"
+            value={reminderAt}
+            min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)}
+            onChange={(event) => setReminderAt(event.target.value)}
+          />
+          <span className="field-help">Alerts work while Memo is open. Allow browser notifications when prompted.</span>
+        </div>
+
+        {error && <p className="auth-error" role="alert">{error}</p>}
+        <div className="form-actions">
+          <button className="secondary-button" onClick={onClose} type="button">Cancel</button>
+          <button className="primary-button" type="submit" disabled={isSaving}>
+            {isSaving ? "Saving..." : type === "edit" ? "Save changes" : "Create note"}
+          </button>
+        </div>
+      </form>
     </div>
-    </>
   );
 }

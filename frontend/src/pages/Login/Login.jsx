@@ -1,82 +1,84 @@
-import React from 'react'
-import Navbar from '../../components/Navbar/Navbar'
-import { Link, useNavigate } from 'react-router-dom'
-import PasswordInput from '../../components/Input/PasswordInput'
-import validEmail from '../../utils/helper'
-import { useState } from 'react'
-import axiosInstance from '../../utils/axiosinstance'
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { MdOutlineDescription } from "react-icons/md";
+import axiosInstance from "../../utils/axiosinstance";
 
 export default function Login() {
-    const navigate = useNavigate();
+  const navigate = useNavigate();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
 
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
+  const finishLogin = (response) => {
+    localStorage.setItem("token", response.data.accessToken);
+    navigate("/dashboard", { replace: true });
+  };
 
-    const handleLogin = async (e) => {
-        e.preventDefault();
-        
-        if(!(email)) {
-            setError('Invalid Email');
-            console.log("Invalid Email")
-            return;
-        }
-
-        if(!password) {
-            setError('Password is required');
-            return;
-        }
-
-        setError('');
-
-        try {
-            const response = await axiosInstance.post('/login', {email:email, password:password});
-
-            if(response.data.error) {
-                setError(response.data.message);
-                return;
-            }
-
-            if(response.data.accessToken) {
-                localStorage.setItem('token', response.data.accessToken);
-                navigate('/dashboard');
-            }
-
-        } catch (error) {
-            console.log(error);
-        }
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    setError("");
+    try {
+      const response = await axiosInstance.post("/login", { email, password });
+      finishLogin(response);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Sign-in failed. Please check your connection and try again.");
     }
+  };
 
   return (
-    <>
-        <Navbar/>
-
-        <div className='flex items-center justify-center mt-28'>
-            <div className='w-96 border rounded bg-white px-7 py-10'>
-                <form onSubmit={handleLogin}>
-                    <h4 className='text-2xl font-bold text-center mb-5'>
-                        Login
-                    </h4>
-                    <input type='email' placeholder='Email' className='input-box' 
-                        value={email}
-                        onChange={(e) => {setEmail(e.target.value)}}
-                    />
-
-                    <PasswordInput 
-                        password={password}
-                        onChange={(e) => {setPassword(e.target.value)}}
-                    />
-
-                    {error && <p className='text-red-500 text-xs pb-1'>{error}</p>}
-
-                    <button type='submit' className='btn-primary'>Login</button>
-
-                    <p>
-                        Not Registered Yet? {" "} <Link to='/signup' className='font-medium text-primary underline'>Create an Account</Link>
-                    </p>
-                </form>
-            </div>
+    <main className="login-page">
+      <section className="login-showcase">
+        <a className="brand" href="/">
+          <span className="brand-mark"><MdOutlineDescription size={22} /></span>
+          memo
+        </a>
+        <div className="showcase-message">
+          <h1>Make room<br />for your ideas.</h1>
+          <p>Your thoughts, plans, and little sparks of inspiration — all in one calm place.</p>
         </div>
-    </>
-  )
+        <span className="showcase-footer">A little space for everything on your mind.</span>
+      </section>
+
+      <section className="login-panel">
+        <div className="login-form">
+          <h2>Welcome back</h2>
+          <p className="login-subtitle">Sign in to pick up where you left off.</p>
+
+          {error && <p className="auth-error" role="alert">{error}</p>}
+
+          <form onSubmit={handleLogin}>
+            <label className="form-field">
+              <span>Email address</span>
+              <input
+                className="auth-input"
+                type="email"
+                autoComplete="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </label>
+            <label className="form-field">
+              <span>Password</span>
+              <input
+                className="auth-input"
+                type="password"
+                autoComplete="current-password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </label>
+            <button className="auth-submit" type="submit">Sign in</button>
+          </form>
+
+          <p className="auth-switch">
+            New to Memo? <Link to="/signup">Create an account</Link>
+          </p>
+        </div>
+      </section>
+    </main>
+  );
 }

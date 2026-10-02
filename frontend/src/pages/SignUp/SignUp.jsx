@@ -1,117 +1,92 @@
-import React from "react";
 import { useState } from "react";
-import Navbar from "../../components/Navbar/Navbar";
-import PasswordInput from "../../components/Input/PasswordInput";
 import { Link, useNavigate } from "react-router-dom";
-import validEmail from "../../utils/helper";
-import axiosInstance from "../../utils/axiosinstance"
+import { MdOutlineDescription } from "react-icons/md";
+import axiosInstance from "../../utils/axiosinstance";
+import { validEmail } from "../../utils/helper";
 
 export default function SignUp() {
+  const navigate = useNavigate();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
-  const navigate = useNavigate();
+  const finishLogin = (response) => {
+    localStorage.setItem("token", response.data.accessToken);
+    navigate("/dashboard", { replace: true });
+  };
 
-  const handleSignUp = async (e) => {
-    e.preventDefault();
-
-    if (!firstName || !lastName || !email || !password) {
-      setError("All fields are required");
+  const handleSignUp = async (event) => {
+    event.preventDefault();
+    if (!firstName.trim() || !lastName.trim() || !email.trim() || !password) {
+      setError("Please complete every field.");
+      return;
+    }
+    if (!validEmail(email)) {
+      setError("Enter a valid email address.");
       return;
     }
 
-    if (!(email)) {
-      setError("Invalid Email");
-      return;
+    setError("");
+    try {
+      const response = await axiosInstance.post("/create-user", {
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        email: email.trim(),
+        password,
+      });
+      finishLogin(response);
+    } catch (requestError) {
+      setError(requestError.response?.data?.message || "Couldn't create your account. Please try again.");
     }
-
-    setError(""); 
-
-      try {
-        const response = await axiosInstance.post("/create-user", {
-          firstName: firstName,
-          lastName: lastName,
-          email: email,
-          password: password
-        });
-
-        if(response.data.error) {
-          setError(response.data.message);
-          return;
-        }
-
-        if(response.data.accessToken) {
-          localStorage.setItem("token", response.data.accessToken);
-          navigate("/dashboard");
-        }
-
-      } catch (error) {
-        console.log(error);
-      }
-
   };
 
   return (
-    <>
-      <Navbar />
-
-      <div className="flex items-center justify-center mt-28">
-        <div className="w-96 border rounded bg-white px-7 py-10">
-          <form onSubmit={handleSignUp}>
-            <h4 className="text-2xl font-bold text-center mb-4">Create Account</h4>
-            <input
-              type="text"
-              placeholder="First Name"
-              className="input-box"
-              value={firstName}
-              onChange={(e) => {
-                setFirstName(e.target.value);
-              }}
-            />
-            <input
-              type="text"
-              placeholder="Last Name"
-              className="input-box"
-              value={lastName}
-              onChange={(e) => {
-                setLastName(e.target.value);
-              }}
-            />
-            <input
-              type="email"
-              placeholder="Email"
-              className="input-box"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-              }}
-            />
-
-            <PasswordInput
-              password={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-              }}
-            />
-
-            {error && <p className="text-red-500 text-xs pb-1">{error}</p>}
-
-            <button type="submit" className="btn-primary">
-              SignUp
-            </button>
-
-            <p>
-              Already have an account?{" "}
-              <Link to="/login" className="font-medium text-primary underline">
-                Login
-              </Link>
-            </p>
-          </form>
+    <main className="login-page">
+      <section className="login-showcase">
+        <a className="brand" href="/login">
+          <span className="brand-mark"><MdOutlineDescription size={22} /></span>
+          memo
+        </a>
+        <div className="showcase-message">
+          <h1>Your next<br />great thought<br />starts here.</h1>
+          <p>Make a little space for the ideas you don&apos;t want to lose.</p>
         </div>
-      </div>
-    </>
+        <span className="showcase-footer">A little space for everything on your mind.</span>
+      </section>
+
+      <section className="login-panel">
+        <div className="login-form">
+          <h2>Create your account</h2>
+          <p className="login-subtitle">Start collecting your ideas in one place.</p>
+          {error && <p className="auth-error" role="alert">{error}</p>}
+
+          <form onSubmit={handleSignUp}>
+            <label className="form-field">
+              <span>First name</span>
+              <input className="auth-input" value={firstName} onChange={(event) => setFirstName(event.target.value)} autoComplete="given-name" required />
+            </label>
+            <label className="form-field">
+              <span>Last name</span>
+              <input className="auth-input" value={lastName} onChange={(event) => setLastName(event.target.value)} autoComplete="family-name" required />
+            </label>
+            <label className="form-field">
+              <span>Email address</span>
+              <input className="auth-input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+            </label>
+            <label className="form-field">
+              <span>Password</span>
+              <input className="auth-input" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required />
+            </label>
+            <button className="auth-submit" type="submit">Create account</button>
+          </form>
+
+          <p className="auth-switch">
+            Already have an account? <Link to="/login">Sign in</Link>
+          </p>
+        </div>
+      </section>
+    </main>
   );
 }

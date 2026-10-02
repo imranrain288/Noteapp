@@ -1,30 +1,42 @@
-import React from "react";
-import { getInitials } from "../../utils/helper";
+import { MdDarkMode, MdLightMode } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
+import { getInitials } from "../../utils/helper";
 
-export default function ProfileInfo({ userInfo }) {
+export default function ProfileInfo({ userInfo, theme, onToggleTheme }) {
   const navigate = useNavigate();
-
   const handleLogout = () => {
     localStorage.removeItem("token");
-    navigate("/login");
+    navigate("/login", { replace: true });
   };
+  const fullName = userInfo
+    ? [userInfo.firstName, userInfo.lastName].filter(Boolean).join(" ") || userInfo.email
+    : "";
+  const initials = getInitials(fullName) || userInfo?.email?.slice(0, 1).toUpperCase();
 
   return (
-    userInfo && (
-      <div className="flex items-center gap-4">
-        <div className="w-10 h-10 hidden sm:flex items-center justify-center rounded-full bg-blue-500 text-white font-bold">
-          {getInitials(`${userInfo.firstName} ${userInfo.lastName}`)}
-        </div>
-        <div className="flex flex-col">
-          <span className="font-medium">
-            {userInfo.firstName} {userInfo.lastName}
-          </span>
-          <button className="text-blue-300 text-xs hover:text-red-300 mt-1" onClick={handleLogout}>
-            Logout
-          </button>
-        </div>
-      </div>
-    )
+    <div className="profile-menu">
+      {userInfo ? (
+        <>
+          <div className="profile-avatar">{initials}</div>
+          <div className="profile-copy">
+            <strong>{fullName}</strong>
+            <span>{userInfo.email}</span>
+          </div>
+        </>
+      ) : (
+        <div className="profile-avatar" aria-label="Loading profile">…</div>
+      )}
+      <button
+        className="theme-toggle"
+        onClick={onToggleTheme}
+        type="button"
+        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+        title={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
+      >
+        {theme === "dark" ? <MdLightMode size={19} /> : <MdDarkMode size={19} />}
+        <span>{theme === "dark" ? "Light" : "Dark"}</span>
+      </button>
+      <button className="logout-button" onClick={handleLogout} type="button">Log out</button>
+    </div>
   );
 }
