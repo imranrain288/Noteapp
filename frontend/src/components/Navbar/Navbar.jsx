@@ -11,9 +11,9 @@ export default function Navbar({
 }) {
   return (
     <header className="topbar">
-      <Link className="brand" to="/dashboard" aria-label="Memo home">
+      <Link className="brand" to="/dashboard" aria-label="NOTES home">
         <span className="brand-mark"><MdOutlineDescription size={22} /></span>
-        memo
+        NOTES
       </Link>
       <label className="search-box">
         <MdSearch size={19} aria-hidden="true" />
