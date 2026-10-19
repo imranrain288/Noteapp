@@ -30,7 +30,7 @@ export default function Login() {
       <section className="login-showcase">
         <a className="brand" href="/">
           <span className="brand-mark"><MdOutlineDescription size={22} /></span>
-          memo
+          notes
         </a>
         <div className="showcase-message">
           <h1>Make room<br />for your ideas.</h1>
