@@ -94,9 +94,9 @@ npm install
 Create `backend/.env` (this file is git-ignored):
 
 ```env
-MONGODB=mongodb://localhost:27017/notetake   # or MONGO_URL=... for an Atlas URI
+MONGODB= your mongodb_url   # or MONGO_URL=... for an Atlas URI
 ACCESS_TOKEN_SECRET=<long random string>
-FRONTEND_URL=http://localhost:5173,https://your-frontend.example.com
+FRONTEND_URL=http://localhost:5173
 PORT=3000
 ```
 
@@ -153,15 +153,6 @@ Base URL is the backend root; every response is JSON with the shape `{ error: bo
 
 Authenticated routes require `Authorization: Bearer <accessToken>` and every note operation is scoped to the token's `userId`, so one user cannot read or modify another user's notes.
 
-Example:
-
-```bash
-curl -X POST http://localhost:3000/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"you@example.com","password":"secret"}'
-
-curl http://localhost:3000/get-notes -H "Authorization: Bearer $TOKEN"
-```
 
 ## Data model
 
