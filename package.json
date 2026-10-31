@@ -1,0 +1,19 @@
+{
+  "name": "noteapp",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Note taking app: React + Vite frontend and Express + MongoDB backend",
+  "type": "module",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "engines": {
+    "node": "22.x"
+  },
+  "scripts": {
+    "build": "npm run build --workspace frontend",
+    "start:backend": "npm start --workspace backend",
+    "start:frontend": "npm start --workspace frontend"
+  }
+}

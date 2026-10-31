@@ -44,14 +44,21 @@ A full-stack note-taking web app for capturing ideas with keywords, colored labe
 | Frontend | React 18, Vite 6, React Router 7, Axios, Tailwind CSS 3 (+ ~1.2k lines of custom CSS in `App.css`), react-icons, react-modal |
 | Backend | Node.js (ESM), Express 4, Mongoose 7, JSON Web Token (HS256), bcryptjs, CORS, dotenv, nodemailer (SMTP), nodemon (dev) |
 | Data | MongoDB; collections `users` and `notes` |
-| Hosting | `Procfile` (`web: npm start`) in both packages; frontend serves its build with `serve -s dist -l $PORT` |
+| Hosting | Vercel (one project: static Vite build plus a `/api` function); `Procfile` (`web: npm start`) in both packages for Render/Railway-style hosts |
 
 ## Project structure
 
 ```
 Noteapp/
+├── api/
+│   ├── index.js               # Vercel function entry: hands /api/* to the Express app
+│   └── [...path].js           # catch-all sibling of the same function
+├── vercel.json                # one-project build: frontend/dist + /api + SPA rewrites
+├── package.json               # npm workspaces root (backend + frontend)
 ├── backend/
-│   ├── server.js              # Express app, all REST routes, CORS, JWT issuing, error handler
+│   ├── app.js                 # Express app: all REST routes, CORS, JWT issuing, error handler
+│   ├── database.js            # cached Mongo connection, resolver probing, retry
+│   ├── server.js              # standalone listener used by npm start / Procfile
 │   ├── utilities.js           # authenticationToken middleware (Bearer JWT verify)
 │   ├── validation.js          # shared name/email/password rules + validation error responses
 │   ├── mailer.js              # nodemailer SMTP sender for password reset links
@@ -112,7 +119,13 @@ FRONTEND_URL=http://localhost:5173
 PORT=3000
 # only needed when the local resolver refuses SRV lookups (querySrv ECONNREFUSED)
 DNS_SERVERS=8.8.8.8,1.1.1.1,9.9.9.9
-# mail the password reset links; without these the link is only returned in the
+# mail the password reset links (see the Notes below)
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+MAIL_FROM=
+RESET_PASSWORD_URL=
 
 ```
 
@@ -138,11 +151,12 @@ Verify: `curl http://localhost:3000/` returns a hello message.
 ```bash
 cd frontend
 npm install
-cp .env.example .env    # VITE_BASE_URL=http://localhost:3000
 npm run dev
 ```
 
-Open http://localhost:5173. If `frontend/.env` is absent, the Axios client falls back to `http://localhost:3000`, which is correct for the default local backend port.
+(Or from the repository root: `npm install` once for both packages, then `npm run build`.)
+
+Open http://localhost:5173. No env file is needed locally: the Axios client falls back to `http://localhost:3000` in development and to `/api` on the same origin in a production build. Copy `.env.example` to `.env` only when the API is hosted on a different host.
 
 Other frontend scripts: `npm run build` (outputs `dist/`), `npm run preview`, `npm run lint`, `npm start` (serves the built app).
 
@@ -185,9 +199,22 @@ Reset tokens are 32 random bytes (64 hex chars), valid for 30 minutes, and singl
 
 ## Deployment
 
-Both packages ship a `Procfile` with `web: npm start`, so they fit Procfile-based hosts (Render, Railway, Heroku-style).
+### Vercel — one project for the app and the API
 
-- **Backend:** install, set `MONGO_URL`, `ACCESS_TOKEN_SECRET`, `FRONTEND_URL`, the `SMTP_*`/`MAIL_FROM` values, and let the platform inject `PORT`. MongoDB must be network-reachable from the app (use a URI string for Atlas; `mongodb://localhost` will not work once deployed). Without working SMTP nobody can receive a password reset link, and `resetUrl` is withheld in production.
+The repository root is the Vercel project. `vercel.json` builds the Vite app into `frontend/dist`, serves it from the CDN, and rewrites `/api/*` to a Vercel Function (`api/index.js`) that wraps the same Express app the backend runs locally.
+
+1. Import the repo at [vercel.com/new](https://vercel.com/new) and leave **Root Directory** at the repository root — not `frontend/` or `backend/`. The framework preset (Vite), build command (`npm run build`) and output directory (`frontend/dist`) all come from `vercel.json`.
+2. Add these in **Project → Settings → Environment Variables** (Production and Preview): `MONGO_URL`, `ACCESS_TOKEN_SECRET`, `FRONTEND_URL`, plus `SMTP_*`/`MAIL_FROM` when reset mail should be delivered. `DNS_SERVERS` is only needed if the function cannot resolve the Atlas SRV record.
+3. Deploy. `https://<project>.vercel.app/api` answers with the JSON banner, `/` serves the app, and client routes (`/login`, `/dashboard`, `/reset-password/:token`) fall back to `index.html` instead of 404.
+4. Delete the old standalone `noteapp-backend` project — it has no serverless entry point, which is why every URL on it answers `404: NOT_FOUND`.
+
+`FRONTEND_URL` must list the deployment origin (`https://<project>.vercel.app`, comma-separated, no trailing slash) or the browser blocks the API responses.
+
+### Procfile hosts (Render, Railway, Heroku-style)
+
+Both packages still ship a `Procfile` with `web: npm start`, and `backend/server.js` still listens on `PORT` when started outside Vercel.
+
+- **Backend:** set `MONGO_URL`, `ACCESS_TOKEN_SECRET`, `FRONTEND_URL` and the `SMTP_*`/`MAIL_FROM` values; the platform injects `PORT`. MongoDB must be network-reachable from the app (an Atlas URI; `mongodb://localhost` will not work once deployed). Without working SMTP nobody can receive a reset link and `resetUrl` is withheld in production.
 - **Frontend:** `npm run build` then `npm start` serves `dist/` with SPA fallback on `$PORT`. Set `VITE_BASE_URL` to the deployed API origin **at build time** — Vite inlines it into the bundle, so changing it requires a rebuild.
 - Browser origins must be added to `FRONTEND_URL`, otherwise the browser blocks API responses and the app reports a failed sign-in.
 
