@@ -112,16 +112,7 @@ FRONTEND_URL=http://localhost:5173
 PORT=3000
 # only needed when the local resolver refuses SRV lookups (querySrv ECONNREFUSED)
 DNS_SERVERS=8.8.8.8,1.1.1.1,9.9.9.9
-# mail the password reset links; without these the link is only returned in the
-# API response (development) instead of being delivered
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=
-SMTP_PASS=
-MAIL_FROM=Notes <no-reply@example.com>
-# optional: public origin used to build reset links (defaults to FRONTEND_URL)
-RESET_PASSWORD_URL=
+
 ```
 
 Notes:
