@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -26,6 +28,10 @@ import {
 dotenv.config({ path: fileURLToPath(new URL('./.env', import.meta.url)) });
 
 const app = express();
+// The API routes live on their own router because they are mounted twice: at the
+// root (the Vercel function strips /api before handing the request over) and
+// under /api (a single service that also serves the built frontend).
+const api = express.Router();
 const asyncHandler = (handler) => (req, res, next) => {
   Promise.resolve(handler(req, res, next)).catch(next);
 };
@@ -94,15 +100,15 @@ const resetPasswordBaseUrl = (req) => {
 // the flow stays usable in development; production only ever emails it.
 const exposesResetLink = process.env.NODE_ENV !== 'production';
 
-app.get('/', (req, res) => {
+api.get('/', (req, res) => {
   res.json("Hello World! This is a note taking app's server.");
 });
 
 // Everything below needs the database, so it is connected once and awaited
 // before the route runs. The banner above stays reachable during a cold start.
-app.use(requireDatabase);
+api.use(requireDatabase);
 
-app.post('/create-user', asyncHandler(async (req, res) => {
+api.post('/create-user', asyncHandler(async (req, res) => {
   const firstName = normalizeName(req.body.firstName);
   const lastName = normalizeName(req.body.lastName);
   const email = normalizeEmail(req.body.email);
@@ -143,7 +149,7 @@ app.post('/create-user', asyncHandler(async (req, res) => {
   });
 }));
 
-app.post('/login', asyncHandler(async (req, res) => {
+api.post('/login', asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body.email);
   const password = typeof req.body.password === 'string' ? req.body.password : '';
 
@@ -179,7 +185,7 @@ app.post('/login', asyncHandler(async (req, res) => {
   });
 }));
 
-app.post('/check-email', asyncHandler(async (req, res) => {
+api.post('/check-email', asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body.email);
   const emailError = validateEmail(email);
   if (emailError) {
@@ -194,7 +200,7 @@ app.post('/check-email', asyncHandler(async (req, res) => {
   });
 }));
 
-app.post('/forgot-password', asyncHandler(async (req, res) => {
+api.post('/forgot-password', asyncHandler(async (req, res) => {
   const email = normalizeEmail(req.body.email);
   const emailError = validateEmail(email);
   if (emailError) {
@@ -244,7 +250,7 @@ app.post('/forgot-password', asyncHandler(async (req, res) => {
   return res.json(response);
 }));
 
-app.get('/verify-reset-token/:token', asyncHandler(async (req, res) => {
+api.get('/verify-reset-token/:token', asyncHandler(async (req, res) => {
   const user = await findUserByResetToken(req.params.token);
   if (!user) {
     return res.status(400).json({ error: true, message: 'This reset link is invalid or has expired. Please request a new one.' });
@@ -253,7 +259,7 @@ app.get('/verify-reset-token/:token', asyncHandler(async (req, res) => {
   return res.json({ error: false, message: 'Reset link is valid.' });
 }));
 
-app.post('/reset-password', asyncHandler(async (req, res) => {
+api.post('/reset-password', asyncHandler(async (req, res) => {
   const password = typeof req.body.password === 'string' ? req.body.password : '';
   const passwordError = validatePassword(password);
   if (passwordError) {
@@ -273,7 +279,7 @@ app.post('/reset-password', asyncHandler(async (req, res) => {
   return res.json({ error: false, message: 'Your password has been updated. You can sign in now.' });
 }));
 
-app.post('/create-note', authenticationToken, asyncHandler(async (req, res) => {
+api.post('/create-note', authenticationToken, asyncHandler(async (req, res) => {
   const { title, content, tags = [], label = '', labelColor = '#F9FBFC', reminderAt = null } = req.body;
   const userId = req.user.user._id;
 
@@ -303,7 +309,7 @@ app.post('/create-note', authenticationToken, asyncHandler(async (req, res) => {
   return res.json({ error: false, note, message: 'Note created successfully.' });
 }));
 
-app.post('/edit-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
+api.post('/edit-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
   const { title, content, tags, isPinned, label, labelColor, reminderAt } = req.body;
   const updates = {};
 
@@ -342,7 +348,7 @@ app.post('/edit-note/:noteId', authenticationToken, asyncHandler(async (req, res
   return res.json({ error: false, note, message: 'Note updated successfully.' });
 }));
 
-app.get('/get-notes', authenticationToken, asyncHandler(async (req, res) => {
+api.get('/get-notes', authenticationToken, asyncHandler(async (req, res) => {
   const filter = { userId: req.user.user._id, isTrashed: { $ne: true } };
   if (req.query.view === 'pinned') filter.isPinned = true;
 
@@ -350,7 +356,7 @@ app.get('/get-notes', authenticationToken, asyncHandler(async (req, res) => {
   return res.json({ error: false, notes, message: 'Notes retrieved successfully.' });
 }));
 
-app.get('/get-trash', authenticationToken, asyncHandler(async (req, res) => {
+api.get('/get-trash', authenticationToken, asyncHandler(async (req, res) => {
   const filter = {
     userId: req.user.user._id,
     isTrashed: true,
@@ -368,7 +374,7 @@ app.get('/get-trash', authenticationToken, asyncHandler(async (req, res) => {
   return res.json({ error: false, notes, message: 'Trash retrieved successfully.' });
 }));
 
-app.delete('/delete-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
+api.delete('/delete-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
   const note = await Note.findOneAndUpdate(
     { _id: req.params.noteId, userId: req.user.user._id, isTrashed: { $ne: true } },
     { $set: { isTrashed: true, trashedAt: new Date() } },
@@ -381,7 +387,7 @@ app.delete('/delete-note/:noteId', authenticationToken, asyncHandler(async (req,
   return res.json({ error: false, message: 'Note moved to trash.' });
 }));
 
-app.put('/restore-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
+api.put('/restore-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
   const note = await Note.findOneAndUpdate(
     { _id: req.params.noteId, userId: req.user.user._id, isTrashed: true },
     { $set: { isTrashed: false }, $unset: { trashedAt: 1 } },
@@ -394,7 +400,7 @@ app.put('/restore-note/:noteId', authenticationToken, asyncHandler(async (req, r
   return res.json({ error: false, note, message: 'Note restored.' });
 }));
 
-app.delete('/permanent-delete-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
+api.delete('/permanent-delete-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
   const note = await Note.findOneAndDelete({
     _id: req.params.noteId,
     userId: req.user.user._id,
@@ -407,7 +413,7 @@ app.delete('/permanent-delete-note/:noteId', authenticationToken, asyncHandler(a
   return res.json({ error: false, message: 'Note permanently deleted.' });
 }));
 
-app.put('/pin-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
+api.put('/pin-note/:noteId', authenticationToken, asyncHandler(async (req, res) => {
   const note = await Note.findOne({
     _id: req.params.noteId,
     userId: req.user.user._id,
@@ -443,10 +449,10 @@ const searchNotes = async (req, res) => {
   return res.json({ error: false, notes, message: 'Notes retrieved successfully.' });
 };
 
-app.get('/search', authenticationToken, asyncHandler(searchNotes));
-app.get('/search/:query', authenticationToken, asyncHandler(searchNotes));
+api.get('/search', authenticationToken, asyncHandler(searchNotes));
+api.get('/search/:query', authenticationToken, asyncHandler(searchNotes));
 
-app.get('/user', authenticationToken, asyncHandler(async (req, res) => {
+api.get('/user', authenticationToken, asyncHandler(async (req, res) => {
   const user = await User.findById(req.user.user._id);
   if (!user) {
     return res.status(404).json({ error: true, message: 'User not found.' });
@@ -455,8 +461,30 @@ app.get('/user', authenticationToken, asyncHandler(async (req, res) => {
   return res.json({ error: false, user: publicUser(user), message: 'User retrieved successfully.' });
 }));
 
-// An unmatched path inside the API answers with JSON instead of Express's HTML
-// page, which makes a mistyped route obvious from the client.
+// When a frontend build sits next to this package the same process also serves
+// it, with a fallback to index.html for client-side routes. On Vercel the build
+// is served from the CDN and the function only ever receives /api requests, so
+// this is limited to a standalone process.
+const distDir = fileURLToPath(new URL('../frontend/dist', import.meta.url));
+const spaIndex = join(distDir, 'index.html');
+const servesSpa = !process.env.VERCEL && existsSync(spaIndex);
+
+app.use('/api', api);
+// The root mount is what the Vercel function needs, because it strips /api
+// before handing the request over. It is skipped when this process owns "/",
+// otherwise the API banner would shadow the app shell.
+if (!servesSpa) {
+  app.use('/', api);
+}
+
+if (servesSpa) {
+  app.use(express.static(distDir));
+  // Anything that is not an API path and not a real file gets the app shell.
+  app.get(/^\/(?!api(?:\/|$)).*/, (req, res) => res.sendFile(spaIndex));
+}
+
+// An unmatched path answers with JSON instead of Express's HTML page, which
+// makes a mistyped route obvious from the client.
 app.use((req, res) => {
   res.status(404).json({ error: true, message: `No route for ${req.method} ${req.originalUrl}.` });
 });

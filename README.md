@@ -154,7 +154,7 @@ npm install
 npm run dev
 ```
 
-(Or from the repository root: `npm install` once for both packages, then `npm run build`.)
+(Or from the repository root: `npm install` once for both packages, then `npm run build` and `npm start`, which serves the build and the API together on one port.)
 
 Open http://localhost:5173. No env file is needed locally: the Axios client falls back to `http://localhost:3000` in development and to `/api` on the same origin in a production build. Copy `.env.example` to `.env` only when the API is hosted on a different host.
 
@@ -212,13 +212,12 @@ The repository root is the Vercel project. `vercel.json` builds the Vite app int
 
 **If the build fails** with `Missing script: "build"` / `npm error workspace backend@1.0.0` / `location .../backend`, the project's Root Directory is still `backend` (left over from a separate API project). Vercel then never reads this `vercel.json` and never builds the React app. Clear Root Directory, Build Command, Output Directory and Install Command in **Settings → Build & Development Settings**, then redeploy.
 
-### Procfile hosts (Render, Railway, Heroku-style)
+### Render / Railway — one service for the app and the API
 
-Both packages still ship a `Procfile` with `web: npm start`, and `backend/server.js` still listens on `PORT` when started outside Vercel.
+The repository root is also runnable as a single long-lived web service: `npm start` boots the Express server, which answers the API under `/api` and serves `frontend/dist` — with an `index.html` fallback for client routes — whenever a build exists. Set **Build Command** to `npm install && npm run build` and **Start Command** to `npm start` (health check path `/api`).
 
-- **Backend:** set `MONGO_URL`, `ACCESS_TOKEN_SECRET`, `FRONTEND_URL` and the `SMTP_*`/`MAIL_FROM` values; the platform injects `PORT`. MongoDB must be network-reachable from the app (an Atlas URI; `mongodb://localhost` will not work once deployed). Without working SMTP nobody can receive a reset link and `resetUrl` is withheld in production.
-- **Frontend:** `npm run build` then `npm start` serves `dist/` with SPA fallback on `$PORT`. Set `VITE_BASE_URL` to the deployed API origin **at build time** — Vite inlines it into the bundle, so changing it requires a rebuild.
-- Browser origins must be added to `FRONTEND_URL`, otherwise the browser blocks API responses and the app reports a failed sign-in.
+- **Environment (single service):** `MONGODB` (or `MONGO_URL`), `ACCESS_TOKEN_SECRET`, `FRONTEND_URL` — include the service's own URL (for example `https://noteapp.onrender.com`) so reset links point back at the app — and `SMTP_*`/`MAIL_FROM` when reset mail should be delivered. Without the build step the API still runs under `/api`, but `/` answers with the JSON banner instead of the app.
+- **Split setup:** `backend/Procfile` (`web: npm start`) still runs a backend-only service; build the frontend separately and set `VITE_BASE_URL` to the API origin **at build time** (Vite inlines it, so changing it requires a rebuild), then add the frontend origin to `FRONTEND_URL`, otherwise the browser blocks API responses and the app reports a failed sign-in.
 
 ## Known limitations
 
