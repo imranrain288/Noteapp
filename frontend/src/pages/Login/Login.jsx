@@ -2,80 +2,133 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { MdOutlineDescription } from "react-icons/md";
 import axiosInstance from "../../utils/axiosinstance";
+import PasswordInput from "../../components/Input/PasswordInput";
+import { validateEmail } from "../../utils/helper";
 
 export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const finishLogin = (response) => {
-    localStorage.setItem("token", response.data.accessToken);
-    navigate("/dashboard", { replace: true });
-  };
-
-  const handleLogin = async (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
+
+    const nextErrors = {
+      email: validateEmail(email),
+      password: password ? "" : "Please enter your password.",
+    };
+    setFieldErrors(nextErrors);
+    if (nextErrors.email || nextErrors.password) return;
+
+    setIsSubmitting(true);
     try {
-      const response = await axiosInstance.post("/login", { email, password });
-      finishLogin(response);
+      const response = await axiosInstance.post("/login", {
+        email: email.trim(),
+        password,
+      });
+      localStorage.setItem("token", response.data.accessToken);
+      navigate("/dashboard", { replace: true });
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Sign-in failed. Please check your connection and try again.");
+      const responseData = requestError.response?.data;
+      if (responseData?.fields) {
+        setFieldErrors((current) => ({ ...current, ...responseData.fields }));
+      } else {
+        setError(responseData?.message || "Sign-in failed. Please check your connection and try again.");
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
     <main className="login-page">
       <section className="login-showcase">
-        <a className="brand" href="/">
+        <a className="brand" href="/login">
           <span className="brand-mark"><MdOutlineDescription size={22} /></span>
-          notes
+          NOTES
         </a>
         <div className="showcase-message">
-          <h1>Make room<br />for your ideas.</h1>
-          <p>Your thoughts, plans, and little sparks of inspiration — all in one calm place.</p>
+          <h1>Welcome<br />back.</h1>
+          <p>Everything you wrote down is exactly where you left it.</p>
         </div>
         <span className="showcase-footer">A little space for everything on your mind.</span>
       </section>
 
       <section className="login-panel">
         <div className="login-form">
-          <h2>Welcome back</h2>
-          <p className="login-subtitle">Sign in to pick up where you left off.</p>
-
+          <h2>Sign in</h2>
+          <p className="login-subtitle">Use your email and password to pick up where you stopped.</p>
           {error && <p className="auth-error" role="alert">{error}</p>}
 
-          <form onSubmit={handleLogin}>
-            <label className="form-field">
-              <span>Email address</span>
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="form-field">
+              <label htmlFor="login-email">Email address</label>
               <input
+                id="login-email"
+                name="email"
                 className="auth-input"
                 type="email"
                 autoComplete="email"
                 placeholder="you@example.com"
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
+                onChange={(event) => {
+                  setEmail(event.target.value);
+                  if (error) setError("");
+                  setFieldErrors((current) => ({ ...current, email: "" }));
+                }}
+                onBlur={() => setFieldErrors((current) => ({ ...current, email: validateEmail(email) }))}
+                aria-invalid={Boolean(fieldErrors.email)}
+                aria-describedby={fieldErrors.email ? "login-email-error" : undefined}
               />
-            </label>
-            <label className="form-field">
-              <span>Password</span>
-              <input
-                className="auth-input"
-                type="password"
+              {fieldErrors.email && <p className="field-error" id="login-email-error">{fieldErrors.email}</p>}
+            </div>
+
+            <div className="form-field">
+              <div className="form-field-head">
+                <label htmlFor="login-password">Password</label>
+                <Link
+                  className="field-link"
+                  to={email.trim()
+                    ? `/forgot-password?email=${encodeURIComponent(email.trim())}`
+                    : "/forgot-password"}
+                >
+                  Forgot password?
+                </Link>
+              </div>
+              <PasswordInput
+                id="login-password"
+                name="password"
                 autoComplete="current-password"
                 placeholder="Enter your password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                required
+                password={password}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  if (error) setError("");
+                  setFieldErrors((current) => ({ ...current, password: "" }));
+                }}
+                onBlur={() => setFieldErrors((current) => ({
+                  ...current,
+                  password: password ? "" : "Please enter your password.",
+                }))}
+                invalid={Boolean(fieldErrors.password)}
+                describedBy={fieldErrors.password ? "login-password-error" : undefined}
               />
-            </label>
-            <button className="auth-submit" type="submit">Sign in</button>
+              {fieldErrors.password && (
+                <p className="field-error" id="login-password-error">{fieldErrors.password}</p>
+              )}
+            </div>
+
+            <button className="auth-submit" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? "Signing in…" : "Sign in"}
+            </button>
           </form>
 
           <p className="auth-switch">
-            New to Memo? <Link to="/signup">Create an account</Link>
+            New here? <Link to="/signup">Create an account</Link>
           </p>
         </div>
       </section>

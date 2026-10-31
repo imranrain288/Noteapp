@@ -14,6 +14,11 @@ export const authenticationToken = (req, res, next) => {
     if (err) {
       return res.status(403).json({ error: true, message: 'Invalid or expired token' });
     }
+    // Anything signed with the same secret but without a user claim (a stray
+    // ticket, a hand-rolled token) must never pass as an access token.
+    if (!decoded?.user?._id) {
+      return res.status(403).json({ error: true, message: 'Invalid or expired token' });
+    }
     req.user = decoded;
     next();
   });

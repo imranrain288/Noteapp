@@ -1,33 +1,46 @@
-import React, { useState } from "react";
+import { useState } from "react";
 
 import { FaRegEye, FaRegEyeSlash } from "react-icons/fa6";
 
-export default function PasswordInput({password, onChange, placeholder}) {
+export default function PasswordInput({
+  password,
+  onChange,
+  onBlur,
+  placeholder = "Password",
+  id,
+  name,
+  autoComplete,
+  inputClassName = "auth-input",
+  describedBy,
+  invalid = false,
+}) {
   const [showPass, setShowPass] = useState(false);
 
   return (
-    <div className="flex items-center bg-transparent border-[1.5px] px-5 rounded mb-3 ">
+    <div className="password-field">
       <input
+        id={id}
+        name={name}
         type={showPass ? "text" : "password"}
         value={password}
         onChange={onChange}
-        placeholder={placeholder || "Password"}
-        className="w-full text-sm py-3 mr-3 bg-transparent rounded outline-none"
+        onBlur={onBlur}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+        className={inputClassName}
+        aria-invalid={invalid || undefined}
+        aria-describedby={describedBy}
       />
 
-      {showPass ? (
-        <FaRegEye
-          size={22}
-          className="text-primary cursor-pointer"
-          onClick={() => setShowPass(!showPass)}
-        />
-      ) : (
-        <FaRegEyeSlash
-          size={22}
-          className="text-primary cursor-pointer"
-          onClick={() => setShowPass(!showPass)}
-        />
-      )}
+      <button
+        type="button"
+        className="password-toggle"
+        aria-label={showPass ? "Hide password" : "Show password"}
+        aria-pressed={showPass}
+        onClick={() => setShowPass((current) => !current)}
+      >
+        {showPass ? <FaRegEye size={19} /> : <FaRegEyeSlash size={19} />}
+      </button>
     </div>
   );
 }

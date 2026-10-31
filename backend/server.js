@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import dns from 'node:dns';
 import dotenv from 'dotenv';
 import express from 'express';
 import cors from 'cors';
@@ -6,6 +8,16 @@ import jwt from 'jsonwebtoken';
 import { authenticationToken } from './utilities.js';
 import User from './models/user.model.js';
 import Note from './models/note.model.js';
+import { sendPasswordResetLink } from './mailer.js';
+import {
+  normalizeEmail,
+  normalizeName,
+  sendValidationError,
+  validateEmail,
+  validateFields,
+  validateName,
+  validatePassword,
+} from './validation.js';
 
 dotenv.config();
 
@@ -34,13 +46,69 @@ if (!mongoUri) {
   throw new Error('Missing MongoDB URI. Set MONGO_URL or MONGODB in the backend environment.');
 }
 
+// Some networks refuse SRV queries from Node's own resolver (mobile hotspots,
+// restrictive routers, and local DNS proxies such as a VPN client, which show up
+// as 127.0.0.1), so "mongodb+srv://" fails with querySrv ECONNREFUSED while the
+// operating system still resolves A records. DNS_SERVERS lists public resolvers
+// to use instead; the list is rotated on retry because a single resolver can be
+// blocked or rate limited even when the others answer.
+const dnsServers = (process.env.DNS_SERVERS || '')
+  .split(',')
+  .map((server) => server.trim())
+  .filter(Boolean);
+
+const DB_CONNECT_ATTEMPTS = 4;
+const DB_RETRY_DELAY_MS = 3000;
+
+const srvHost = /^mongodb\+srv:\/\//i.test(mongoUri) ? new URL(mongoUri).hostname : '';
+
+const rotateResolvers = (servers, offset) => {
+  const start = offset % servers.length;
+  return [...servers.slice(start), ...servers.slice(0, start)];
+};
+
+// Probe each resolver once and move the first one that answers SRV to the front,
+// so a refusing entry in the list does not cost a full connection timeout before
+// the retry rotates past it.
+const promoteWorkingResolver = async () => {
+  if (!dnsServers.length || !srvHost) {
+    return;
+  }
+
+  for (let index = 0; index < dnsServers.length; index += 1) {
+    dns.setServers([dnsServers[index]]);
+    try {
+      await dns.promises.resolveSrv(`_mongodb._tcp.${srvHost}`);
+      dnsServers.unshift(...dnsServers.splice(index, 1));
+      return;
+    } catch {
+      // resolver refused the query, try the next one
+    }
+  }
+};
+
 if (!process.env.ACCESS_TOKEN_SECRET) {
   throw new Error('Missing ACCESS_TOKEN_SECRET in the backend environment.');
 }
 
-mongoose.connect(mongoUri)
-  .then(() => console.log('MongoDB connection successful'))
-  .catch((error) => console.error('MongoDB connection error:', error));
+const connectToDatabase = async (attempt = 0) => {
+  if (dnsServers.length) {
+    dns.setServers(rotateResolvers(dnsServers, attempt));
+  }
+
+  try {
+    await mongoose.connect(mongoUri);
+    console.log('MongoDB connection successful');
+  } catch (error) {
+    console.error(`MongoDB connection error (attempt ${attempt + 1}/${DB_CONNECT_ATTEMPTS}):`, error.message);
+    if (attempt + 1 < DB_CONNECT_ATTEMPTS) {
+      setTimeout(() => connectToDatabase(attempt + 1), DB_RETRY_DELAY_MS);
+    }
+  }
+};
+
+await promoteWorkingResolver();
+connectToDatabase();
 
 const createAccessToken = (user) => jwt.sign(
   { user: { _id: user._id } },
@@ -56,24 +124,73 @@ const publicUser = (user) => ({
   createdAt: user.createdAt,
 });
 
+const RESET_TOKEN_TTL_MINUTES = 30;
+const RESET_TOKEN_PATTERN = /^[a-f0-9]{64}$/i;
+
+// Only a digest of the reset token is persisted, so a database leak cannot be
+// replayed against the reset endpoint.
+const hashResetToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+
+const findUserByResetToken = (token) => {
+  if (typeof token !== 'string' || !RESET_TOKEN_PATTERN.test(token)) return Promise.resolve(null);
+  return User.findOne({
+    passwordResetTokenHash: hashResetToken(token),
+    passwordResetExpiresAt: { $gt: new Date() },
+  });
+};
+
+// The reset link has to point at the deployed frontend, not at the API. An
+// explicit RESET_PASSWORD_URL wins, then the caller's allow-listed origin, then
+// the first FRONTEND_URL entry (local development).
+const resetPasswordBaseUrl = (req) => {
+  const origin = req.get('origin');
+  const configured = process.env.RESET_PASSWORD_URL
+    || (origin && (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) ? origin : '')
+    || (process.env.FRONTEND_URL || '').split(',')[0]
+    || 'http://localhost:5173';
+  return configured.trim().replace(/\/+$/, '');
+};
+
+// When the mail cannot be delivered the link is handed back in the response so
+// the flow stays usable in development; production only ever emails it.
+const exposesResetLink = process.env.NODE_ENV !== 'production';
+
 app.get('/', (req, res) => {
   res.json("Hello World! This is a note taking app's server.");
 });
 
 app.post('/create-user', asyncHandler(async (req, res) => {
-  const { firstName, lastName, email, password } = req.body;
-  if (!firstName || !lastName || !email || !password) {
-    return res.status(400).json({ error: true, message: 'Please fill in all fields.' });
+  const firstName = normalizeName(req.body.firstName);
+  const lastName = normalizeName(req.body.lastName);
+  const email = normalizeEmail(req.body.email);
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+
+  const fields = validateFields({
+    firstName: validateName(firstName, 'First name'),
+    lastName: validateName(lastName, 'Last name'),
+    email: validateEmail(email),
+    password: validatePassword(password),
+  });
+  if (Object.keys(fields).length) {
+    return sendValidationError(res, fields);
   }
 
-  const normalizedEmail = email.trim().toLowerCase();
-  const existingUser = await User.findOne({ email: normalizedEmail });
+  const existingUser = await User.findOne({ email });
   if (existingUser) {
-    return res.status(400).json({ error: true, message: 'User already exists.' });
+    return sendValidationError(res, { email: 'An account with this email already exists.' });
   }
 
-  const user = new User({ firstName, lastName, email: normalizedEmail, password });
-  await user.save();
+  const user = new User({ firstName, lastName, email, password });
+  try {
+    await user.save();
+  } catch (error) {
+    // Two simultaneous signups can both pass the lookup above; the unique index
+    // is the real guard, so translate it into a field error.
+    if (error?.code === 11000) {
+      return sendValidationError(res, { email: 'An account with this email already exists.' });
+    }
+    throw error;
+  }
 
   return res.json({
     error: false,
@@ -84,18 +201,31 @@ app.post('/create-user', asyncHandler(async (req, res) => {
 }));
 
 app.post('/login', asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: true, message: 'Please fill in all fields.' });
+  const email = normalizeEmail(req.body.email);
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+
+  const fields = validateFields({
+    email: validateEmail(email),
+    password: password ? null : 'Please enter your password.',
+  });
+  if (Object.keys(fields).length) {
+    return sendValidationError(res, fields);
   }
 
-  const user = await User.findOne({ email: email.trim().toLowerCase() });
+  const user = await User.findOne({ email });
+  const invalidCredentials = { error: true, message: 'Incorrect email or password.' };
   if (!user) {
-    return res.status(400).json({ error: true, message: 'User does not exist.' });
+    return res.status(400).json(invalidCredentials);
   }
 
-  if (user.password !== password) {
-    return res.status(400).json({ error: true, message: 'Invalid credentials.' });
+  if (!(await user.verifyPassword(password))) {
+    return res.status(400).json(invalidCredentials);
+  }
+
+  // Seamless upgrade for accounts created while passwords were stored verbatim.
+  if (user.hasLegacyPassword()) {
+    user.password = await User.hashPassword(password);
+    await user.save();
   }
 
   return res.json({
@@ -104,6 +234,100 @@ app.post('/login', asyncHandler(async (req, res) => {
     accessToken: createAccessToken(user),
     message: 'User logged in successfully.',
   });
+}));
+
+app.post('/check-email', asyncHandler(async (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const emailError = validateEmail(email);
+  if (emailError) {
+    return sendValidationError(res, { email: emailError });
+  }
+
+  const existingUser = await User.exists({ email });
+  return res.json({
+    error: false,
+    available: !existingUser,
+    message: existingUser ? 'An account with this email already exists.' : 'This email is available.',
+  });
+}));
+
+app.post('/forgot-password', asyncHandler(async (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const emailError = validateEmail(email);
+  if (emailError) {
+    return sendValidationError(res, { email: emailError });
+  }
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    return res.json({
+      error: false,
+      message: `If an account exists for that email, a reset link is on its way. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.`,
+    });
+  }
+
+  const token = crypto.randomBytes(32).toString('hex');
+  user.passwordResetTokenHash = hashResetToken(token);
+  user.passwordResetExpiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+  await user.save();
+
+  const resetUrl = `${resetPasswordBaseUrl(req)}/reset-password/${token}`;
+  let delivered = false;
+  try {
+    ({ delivered } = await sendPasswordResetLink({
+      to: email,
+      resetUrl,
+      expiresInMinutes: RESET_TOKEN_TTL_MINUTES,
+    }));
+  } catch (error) {
+    console.error('[forgot-password] Mail delivery failed:', error.message);
+  }
+
+  const response = {
+    error: false,
+    // Same answer whether or not the account exists, so this endpoint cannot be
+    // used to find out which emails are registered.
+    message: delivered
+      ? `If an account exists for that email, a reset link is on its way. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.`
+      : `If an account exists for that email, a reset link has been created. It expires in ${RESET_TOKEN_TTL_MINUTES} minutes.`,
+  };
+
+  if (!delivered) {
+    console.warn(`[forgot-password] The reset link for ${email} was not emailed.`);
+    // Development escape hatch: without working SMTP the link is unusable otherwise.
+    if (exposesResetLink) response.resetUrl = resetUrl;
+  }
+
+  return res.json(response);
+}));
+
+app.get('/verify-reset-token/:token', asyncHandler(async (req, res) => {
+  const user = await findUserByResetToken(req.params.token);
+  if (!user) {
+    return res.status(400).json({ error: true, message: 'This reset link is invalid or has expired. Please request a new one.' });
+  }
+
+  return res.json({ error: false, message: 'Reset link is valid.' });
+}));
+
+app.post('/reset-password', asyncHandler(async (req, res) => {
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+  const passwordError = validatePassword(password);
+  if (passwordError) {
+    return sendValidationError(res, { password: passwordError });
+  }
+
+  const user = await findUserByResetToken(req.body.token);
+  if (!user) {
+    return res.status(400).json({ error: true, message: 'This reset link is invalid or has expired. Please request a new one.' });
+  }
+
+  user.password = password;
+  user.passwordResetTokenHash = null;
+  user.passwordResetExpiresAt = null;
+  await user.save();
+
+  return res.json({ error: false, message: 'Your password has been updated. You can sign in now.' });
 }));
 
 app.post('/create-note', authenticationToken, asyncHandler(async (req, res) => {
