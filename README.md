@@ -210,6 +210,8 @@ The repository root is the Vercel project. `vercel.json` builds the Vite app int
 
 `FRONTEND_URL` must list the deployment origin (`https://<project>.vercel.app`, comma-separated, no trailing slash) or the browser blocks the API responses.
 
+**If the build fails** with `Missing script: "build"` / `npm error workspace backend@1.0.0` / `location .../backend`, the project's Root Directory is still `backend` (left over from a separate API project). Vercel then never reads this `vercel.json` and never builds the React app. Clear Root Directory, Build Command, Output Directory and Install Command in **Settings → Build & Development Settings**, then redeploy.
+
 ### Procfile hosts (Render, Railway, Heroku-style)
 
 Both packages still ship a `Procfile` with `web: npm start`, and `backend/server.js` still listens on `PORT` when started outside Vercel.
